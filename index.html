@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phoenix Call Screener</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23f97316'/><text x='16' y='22' text-anchor='middle' font-size='18' fill='white'>🔥</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Tokens ───────────────────────── */
+:root {
+  --bg: #0a0c10;
+  --bg2: #0f1117;
+  --bg3: #151820;
+  --bg4: #1c2030;
+  --surface: #12141c;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.13);
+  --accent: #f97316;
+  --accent2: #fb923c;
+  --accent-dim: rgba(249,115,22,0.13);
+  --accent-glow: rgba(249,115,22,0.25);
+  --green: #22c55e;
+  --green-dim: rgba(34,197,94,0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.12);
+  --blue: #3b82f6;
+  --blue-dim: rgba(59,130,246,0.12);
+  --yellow: #eab308;
+  --yellow-dim: rgba(234,179,8,0.12);
+  --purple: #a855f7;
+  --text: #f1f5f9;
+  --text2: #94a3b8;
+  --text3: #64748b;
+  --radius: 12px;
+  --radius-lg: 16px;
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 13px;
+  overflow-x: hidden;
+}
+
+/* ── Top Status Bar ─────────────────────────── */
+.status-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+}
+.sb-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sb-logo {
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  box-shadow: 0 0 16px var(--accent-glow);
+  flex-shrink: 0;
+}
+.sb-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.3px;
+}
+.sb-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.sb-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ws-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text3);
+}
+.ws-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.ws-dot.connected {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse-dot 2s infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.queue-badge {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid rgba(249,115,22,0.2);
+}
+
+/* ── Settings Panel ────────────────────────── */
+.settings-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: all 0.14s;
+}
+.settings-btn:hover { background: var(--bg4); color: var(--text); }
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.settings-overlay.open { display: flex; }
+.settings-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 380px;
+  max-width: 90vw;
+}
+.settings-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+.setting-hint {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.setting-input {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 6px 10px;
+  width: 200px;
+  outline: none;
+  transition: border-color 0.14s;
+}
+.setting-input:focus { border-color: var(--accent); }
+.setting-toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+}
+.setting-toggle.on { background: var(--accent); border-color: var(--accent); }
+.setting-toggle::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s;
+}
+.setting-toggle.on::after { transform: translateX(16px); }
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ── Main Content ──────────────────────────── */
+.main-area {
+  margin-top: 64px;
+  width: 100%;
+  max-width: 520px;
+  padding: 0 16px;
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+  gap: 16px;
+}
+.empty-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+}
+.empty-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.3px;
+}
+.empty-sub {
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.6;
+  max-width: 300px;
+}
+
+/* ── Call Cards Stack ─────────────────────── */
+.card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 40px;
+}
+
+/* ── Call Card ────────────────────────────── */
+.call-card {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+.call-card.ringing {
+  border-color: rgba(249,115,22,0.4);
+  box-shadow: 0 0 30px rgba(249,115,22,0.12), 0 8px 40px rgba(0,0,0,0.3);
+  animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1), ring-glow 2s ease-in-out infinite;
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes ring-glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(249,115,22,0.12), 0 8px 40px rgba(0,0,0,0.3); }
+  50% { box-shadow: 0 0 50px rgba(249,115,22,0.25), 0 8px 40px rgba(0,0,0,0.3); }
+}
+
+/* Card Header */
+.cc-header {
+  padding: 16px 18px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cc-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--accent), #dc2626);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  color: white;
+  flex-shrink: 0;
+}
+.cc-info { flex: 1; min-width: 0; }
+.cc-name {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-phone {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  color: var(--text2);
+  margin-top: 2px;
+}
+.cc-pills {
+  display: flex;
+  gap: 5px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.pill {
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+}
+.pill-hot { background: var(--accent-dim); color: var(--accent); }
+.pill-new { background: var(--green-dim); color: var(--green); }
+.pill-returning { background: var(--blue-dim); color: var(--blue); }
+.pill-missed { background: var(--red-dim); color: var(--red); }
+.pill-source { background: var(--bg4); color: var(--text2); }
+.pill-live {
+  background: var(--green-dim);
+  color: var(--green);
+  border: 1px solid rgba(34,197,94,0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pill-live::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 1.4s infinite;
+}
+.cc-time-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text3);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.cc-dismiss {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: all 0.14s;
+}
+.cc-dismiss:hover { background: var(--red-dim); color: var(--red); }
+
+/* Card Body — Caller Intel */
+.cc-body {
+  padding: 12px 18px 14px;
+}
+.cc-intel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.intel-item {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+.intel-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  color: var(--text3);
+  font-family: 'JetBrains Mono', monospace;
+  margin-bottom: 3px;
+}
+.intel-value {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.intel-value.accent { color: var(--accent); }
+.intel-value.green { color: var(--green); }
+.intel-value.blue { color: var(--blue); }
+
+/* AI Summary */
+.cc-ai-summary {
+  background: linear-gradient(135deg, rgba(249,115,22,0.06), rgba(59,130,246,0.04));
+  border: 1px solid rgba(249,115,22,0.18);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+.cc-ai-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.cc-ai-text {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+/* Lead Score */
+.cc-lead-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 0 0;
+}
+.lead-ring {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lead-ring::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--bg3);
+}
+.lead-num {
+  position: relative;
+  z-index: 1;
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 12px;
+}
+.lead-bars { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.lead-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lead-bar-label {
+  font-size: 9px;
+  color: var(--text3);
+  width: 46px;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+}
+.lead-bar-track {
+  flex: 1;
+  height: 4px;
+  background: var(--bg4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.lead-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Card Footer — Actions */
+.cc-footer {
+  padding: 0 18px 14px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.action-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: 'Inter', sans-serif;
+  transition: all 0.14s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+.action-btn:active { transform: scale(0.97); }
+.btn-answer {
+  background: var(--green);
+  color: white;
+  box-shadow: 0 2px 12px rgba(34,197,94,0.3);
+}
+.btn-answer:hover { background: #16a34a; }
+.btn-sms {
+  background: var(--blue-dim);
+  color: var(--blue);
+  border: 1px solid rgba(59,130,246,0.2);
+}
+.btn-sms:hover { background: rgba(59,130,246,0.2); }
+.btn-email {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid rgba(249,115,22,0.2);
+}
+.btn-email:hover { background: rgba(249,115,22,0.2); }
+.btn-shopify {
+  background: var(--green-dim);
+  color: var(--green);
+  border: 1px solid rgba(34,197,94,0.2);
+}
+.btn-shopify:hover { background: rgba(34,197,94,0.2); }
+.btn-dismiss {
+  background: var(--bg4);
+  color: var(--text3);
+  border: 1px solid var(--border);
+}
+.btn-dismiss:hover { background: var(--bg3); color: var(--text2); }
+
+.cc-footer-row2 {
+  padding: 0 18px 14px;
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Dismissed / History Cards ───────────── */
+.call-card.dismissed {
+  opacity: 0.5;
+  border-color: var(--border);
+}
+.call-card.dismissed .cc-header { padding: 12px 16px; }
+.call-card.dismissed .cc-body,
+.call-card.dismissed .cc-footer,
+.call-card.dismissed .cc-footer-row2 { display: none; }
+
+/* ── Loading shimmer ────────────────────── */
+.shimmer {
+  background: linear-gradient(90deg, var(--bg3) 25%, var(--bg4) 50%, var(--bg3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Toast ──────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error { border-left: 3px solid var(--red); }
+.toast.info { border-left: 3px solid var(--blue); }
+
+/* ── Agent Status Row ───────────────────── */
+.agent-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.agent-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.agent-chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.agent-chip .dot.online { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.agent-chip .dot.offline { background: var(--text3); }
+.agent-chip .dot.busy { background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+
+/* ── Responsive ─────────────────────────── */
+@media (max-width: 560px) {
+  .main-area { max-width: 100%; }
+  .cc-intel-grid { grid-template-columns: 1fr; }
+  .cc-footer { flex-direction: column; }
+  .action-btn { flex: unset; width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="sb-left">
+    <div class="sb-logo">🔥</div>
+    <div>
+      <div class="sb-title">Phoenix Call Screener</div>
+      <div class="sb-sub">Real-time Caller Intelligence</div>
+    </div>
+  </div>
+  <div class="sb-right">
+    <div class="ws-indicator">
+      <div class="ws-dot" id="wsDot"></div>
+      <span id="wsLabel">Disconnected</span>
+    </div>
+    <div class="queue-badge" id="queueBadge">Queue: 0</div>
+    <button class="settings-btn" id="settingsBtn" title="Settings">⚙</button>
+  </div>
+</div>
+
+<!-- Settings Overlay -->
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-panel">
+    <div class="settings-title">Connection Settings</div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Server URL</div>
+        <div class="setting-hint">Phoenix Phone Server address</div>
+      </div>
+      <input class="setting-input" id="cfgServerUrl" placeholder="wss://your-server.com">
+    </div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Sound Alerts</div>
+        <div class="setting-hint">Play tone on incoming call</div>
+      </div>
+      <div class="setting-toggle on" id="cfgSound" onclick="toggleSetting(this)"></div>
+    </div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Desktop Notifications</div>
+        <div class="setting-hint">Browser push notifications</div>
+      </div>
+      <div class="setting-toggle on" id="cfgNotify" onclick="toggleSetting(this)"></div>
+    </div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Auto-dismiss (seconds)</div>
+        <div class="setting-hint">0 = never auto-dismiss</div>
+      </div>
+      <input class="setting-input" id="cfgAutoDismiss" type="number" value="0" min="0" style="width:80px;">
+    </div>
+    <div class="settings-actions">
+      <button class="action-btn btn-dismiss" onclick="closeSettings()">Cancel</button>
+      <button class="action-btn btn-answer" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main Area -->
+<div class="main-area">
+  <!-- Agent Status -->
+  <div class="agent-row" id="agentRow">
+    <div class="agent-chip"><div class="dot offline"></div> Glen — offline</div>
+    <div class="agent-chip"><div class="dot offline"></div> Danny — offline</div>
+  </div>
+
+  <!-- Call Cards -->
+  <div class="card-stack" id="cardStack">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">📞</div>
+      <div class="empty-title">No active calls</div>
+      <div class="empty-sub">
+        When a call comes in, a card will appear here with caller info, lead score, and action buttons.
+        <br><br>
+        Connect to your Phoenix Phone Server via the settings gear above.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ═══════════════════════════════════════════════
+// PHOENIX CALL SCREENER
+// Connects to Phoenix Phone Server WebSocket
+// ═══════════════════════════════════════════════
+
+const CONFIG_KEY = 'phoenix-screener-config';
+let ws = null;
+let reconnectTimer = null;
+let reconnectDelay = 2000;
+let callCards = {};
+let serverBaseUrl = '';
+
+// ── Config ─────────────────────────────────
+function loadConfig() {
+  const defaults = {
+    serverUrl: 'wss://phoenix-phone-server.onrender.com',
+    soundEnabled: true,
+    notifyEnabled: true,
+    autoDismiss: 0
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
+    return { ...defaults, ...saved };
+  } catch { return defaults; }
+}
+
+function saveConfig(cfg) {
+  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); } catch {}
+}
+
+let config = loadConfig();
+
+// ── Settings UI ────────────────────────────
+document.getElementById('settingsBtn').onclick = () => {
+  const overlay = document.getElementById('settingsOverlay');
+  document.getElementById('cfgServerUrl').value = config.serverUrl;
+  document.getElementById('cfgSound').className = 'setting-toggle' + (config.soundEnabled ? ' on' : '');
+  document.getElementById('cfgNotify').className = 'setting-toggle' + (config.notifyEnabled ? ' on' : '');
+  document.getElementById('cfgAutoDismiss').value = config.autoDismiss;
+  overlay.classList.add('open');
+};
+
+function toggleSetting(el) { el.classList.toggle('on'); }
+function closeSettings() { document.getElementById('settingsOverlay').classList.remove('open'); }
+
+function saveSettings() {
+  const newUrl = document.getElementById('cfgServerUrl').value.trim();
+  const changed = newUrl !== config.serverUrl;
+  config.serverUrl = newUrl;
+  config.soundEnabled = document.getElementById('cfgSound').classList.contains('on');
+  config.notifyEnabled = document.getElementById('cfgNotify').classList.contains('on');
+  config.autoDismiss = parseInt(document.getElementById('cfgAutoDismiss').value) || 0;
+  saveConfig(config);
+  closeSettings();
+  showToast('Settings saved', 'success');
+  if (changed) {
+    if (ws) ws.close();
+    connectWS();
+  }
+}
+
+// ── WebSocket Connection ──────────────────
+function connectWS() {
+  if (!config.serverUrl) return;
+  
+  // Derive HTTP base URL for API calls
+  serverBaseUrl = config.serverUrl
+    .replace('wss://', 'https://')
+    .replace('ws://', 'http://');
+  
+  const url = config.serverUrl;
+  updateWSStatus('connecting');
+  
+  try {
+    ws = new WebSocket(url);
+  } catch (e) {
+    updateWSStatus('error');
+    scheduleReconnect();
+    return;
+  }
+  
+  ws.onopen = () => {
+    updateWSStatus('connected');
+    reconnectDelay = 2000;
+    showToast('Connected to Phoenix Phone Server', 'success');
+  };
+  
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      handleWSMessage(msg);
+    } catch (e) {
+      console.error('WS parse error:', e);
+    }
+  };
+  
+  ws.onclose = () => {
+    updateWSStatus('disconnected');
+    scheduleReconnect();
+  };
+  
+  ws.onerror = () => {
+    updateWSStatus('error');
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
+    connectWS();
+  }, reconnectDelay);
+}
+
+function updateWSStatus(status) {
+  const dot = document.getElementById('wsDot');
+  const label = document.getElementById('wsLabel');
+  dot.className = 'ws-dot' + (status === 'connected' ? ' connected' : '');
+  const labels = {
+    connected: 'Connected',
+    connecting: 'Connecting…',
+    disconnected: 'Disconnected',
+    error: 'Connection Error'
+  };
+  label.textContent = labels[status] || status;
+}
+
+// ── Handle Incoming WS Messages ───────────
+function handleWSMessage(msg) {
+  if (msg.type === 'STATE') {
+    handleState(msg);
+  }
+  if (msg.type === 'INCOMING_TRANSFER') {
+    // A transfer to an agent — flash that card
+    const card = callCards[msg.callSid];
+    if (card) {
+      card.element.style.borderColor = 'rgba(168,85,247,0.5)';
+      setTimeout(() => { card.element.style.borderColor = ''; }, 3000);
+    }
+  }
+}
+
+function handleState(state) {
+  const { queue, agents, activeCalls } = state;
+  
+  // Update queue badge
+  const waiting = (queue || []).filter(c => c.status === 'waiting').length;
+  document.getElementById('queueBadge').textContent = `Queue: ${waiting}`;
+  
+  // Update agent chips
+  updateAgents(agents);
+  
+  // Process call queue
+  const currentSids = new Set();
+  
+  (queue || []).forEach(call => {
+    currentSids.add(call.callSid);
+    if (callCards[call.callSid]) {
+      // Update existing card
+      updateCard(call.callSid, call, activeCalls);
+    } else {
+      // New call — create card
+      createCard(call, activeCalls);
+    }
+  });
+  
+  // Remove cards no longer in queue (after brief delay)
+  Object.keys(callCards).forEach(sid => {
+    if (!currentSids.has(sid) && !callCards[sid].dismissed) {
+      dismissCard(sid, 'Call ended');
+    }
+  });
+  
+  // Update empty state
+  const hasCards = document.querySelectorAll('.call-card:not(.dismissed)').length > 0;
+  document.getElementById('emptyState').style.display = hasCards ? 'none' : 'flex';
+}
+
+function updateAgents(agents) {
+  const row = document.getElementById('agentRow');
+  if (!agents) return;
+  
+  row.innerHTML = Object.entries(agents).map(([id, agent]) => {
+    let dotClass = 'offline';
+    let label = 'offline';
+    if (agent.activeSid) { dotClass = 'busy'; label = 'on call'; }
+    else if (agent.available) { dotClass = 'online'; label = 'available'; }
+    return `<div class="agent-chip"><div class="dot ${dotClass}"></div> ${agent.name} — ${label}</div>`;
+  }).join('');
+}
+
+// ── Create Call Card ─────────────────────
+async function createCard(call, activeCalls) {
+  const sid = call.callSid;
+  const isActive = !!activeCalls?.[sid];
+  const isMissed = call.status === 'missed';
+  const isWaiting = call.status === 'waiting';
+  
+  // Play sound / notify
+  if (isWaiting) {
+    playRingTone();
+    sendDesktopNotification(call);
+  }
+  
+  const el = document.createElement('div');
+  el.className = 'call-card' + (isWaiting ? ' ringing' : '');
+  el.id = 'card-' + sid;
+  
+  const initials = getInitials(call.callerName);
+  const phone = formatPhone(call.caller);
+  const timeStr = new Date(call.enqueuedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  
+  // Start with basic info, enrich later
+  el.innerHTML = `
+    <div class="cc-header">
+      <div class="cc-avatar">${initials}</div>
+      <div class="cc-info">
+        <div class="cc-name">${call.callerName || phone}</div>
+        <div class="cc-phone">${phone} · Inbound</div>
+        <div class="cc-pills">
+          ${isWaiting ? '<span class="pill pill-live">Ringing</span>' : ''}
+          ${isActive ? '<span class="pill pill-source">Active</span>' : ''}
+          ${call.source ? `<span class="pill pill-source">${call.source}</span>` : ''}
+        </div>
+      </div>
+      <div class="cc-time-badge">
+        <span>${timeStr}</span>
+        <button class="cc-dismiss" onclick="dismissCard('${sid}', 'Dismissed')" title="Dismiss">✕</button>
+      </div>
+    </div>
+    <div class="cc-body">
+      <div class="cc-intel-grid">
+        <div class="intel-item">
+          <div class="intel-label">Caller</div>
+          <div class="intel-value" id="intel-name-${sid}">${call.callerName || 'Looking up…'}</div>
+        </div>
+        <div class="intel-item">
+          <div class="intel-label">Location</div>
+          <div class="intel-value" id="intel-loc-${sid}"><div class="shimmer" style="width:80px;height:14px;"></div></div>
+        </div>
+        <div class="intel-item">
+          <div class="intel-label">Total Calls</div>
+          <div class="intel-value accent" id="intel-calls-${sid}"><div class="shimmer" style="width:40px;height:14px;"></div></div>
+        </div>
+        <div class="intel-item">
+          <div class="intel-label">Revenue</div>
+          <div class="intel-value green" id="intel-rev-${sid}"><div class="shimmer" style="width:60px;height:14px;"></div></div>
+        </div>
+        <div class="intel-item">
+          <div class="intel-label">Orders</div>
+          <div class="intel-value blue" id="intel-orders-${sid}"><div class="shimmer" style="width:40px;height:14px;"></div></div>
+        </div>
+        <div class="intel-item">
+          <div class="intel-label">Status</div>
+          <div class="intel-value" id="intel-status-${sid}"><div class="shimmer" style="width:60px;height:14px;"></div></div>
+        </div>
+      </div>
+      <div class="cc-ai-summary" id="ai-summary-${sid}" style="display:none;">
+        <div class="cc-ai-label">✦ AI Summary</div>
+        <div class="cc-ai-text" id="ai-text-${sid}"></div>
+      </div>
+      <div class="cc-lead-row" id="lead-row-${sid}" style="display:none;">
+        <div class="lead-ring" id="lead-ring-${sid}">
+          <div class="lead-num" id="lead-num-${sid}">—</div>
+        </div>
+        <div class="lead-bars">
+          <div class="lead-bar-row">
+            <span class="lead-bar-label">Intent</span>
+            <div class="lead-bar-track"><div class="lead-bar-fill" id="bar-intent-${sid}" style="width:0%;background:var(--green);"></div></div>
+          </div>
+          <div class="lead-bar-row">
+            <span class="lead-bar-label">Urgency</span>
+            <div class="lead-bar-track"><div class="lead-bar-fill" id="bar-urgency-${sid}" style="width:0%;background:var(--accent);"></div></div>
+          </div>
+          <div class="lead-bar-row">
+            <span class="lead-bar-label">Budget</span>
+            <div class="lead-bar-track"><div class="lead-bar-fill" id="bar-budget-${sid}" style="width:0%;background:var(--blue);"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cc-footer">
+      <button class="action-btn btn-answer" onclick="answerCall('${sid}', 'glen')">📞 Answer</button>
+      <button class="action-btn btn-sms" onclick="sendQuickSMS('${sid}')">💬 SMS</button>
+      <button class="action-btn btn-email" onclick="sendEmail('${sid}')">✉️ Email</button>
+    </div>
+    <div class="cc-footer-row2">
+      <button class="action-btn btn-shopify" onclick="openShopify('${sid}')">🛒 Shopify</button>
+      <button class="action-btn btn-dismiss" onclick="dismissCard('${sid}', 'Dismissed')">Skip</button>
+    </div>
+  `;
+  
+  // Insert at top of stack
+  const stack = document.getElementById('cardStack');
+  const empty = document.getElementById('emptyState');
+  stack.insertBefore(el, empty);
+  
+  callCards[sid] = { element: el, call, dismissed: false };
+  
+  // Enrich with caller data
+  enrichCard(sid, call.caller);
+  
+  // Auto-dismiss
+  if (config.autoDismiss > 0) {
+    setTimeout(() => dismissCard(sid, 'Auto-dismissed'), config.autoDismiss * 1000);
+  }
+}
+
+function updateCard(sid, call, activeCalls) {
+  const card = callCards[sid];
+  if (!card || card.dismissed) return;
+  
+  const el = card.element;
+  const isActive = !!activeCalls?.[sid];
+  const isWaiting = call.status === 'waiting';
+  
+  if (isActive && el.classList.contains('ringing')) {
+    el.classList.remove('ringing');
+    stopRingTone();
+  }
+  
+  card.call = call;
+}
+
+// ── Enrich Card with Caller Data ─────────
+async function enrichCard(sid, phone) {
+  if (!serverBaseUrl || !phone) return;
+  
+  try {
+    // Parallel lookups via the Phone Server's API
+    const [callerRes, callrailRes, shopifyRes] = await Promise.allSettled([
+      fetch(`${serverBaseUrl}/caller-data?phone=${encodeURIComponent(phone)}`).then(r => r.json()),
+      fetch(`${serverBaseUrl}/lookup/callrail?phone=${encodeURIComponent(phone)}`).then(r => r.json()),
+      fetch(`${serverBaseUrl}/lookup/shopify?phone=${encodeURIComponent(phone)}`).then(r => r.json())
+    ]);
+    
+    const caller = callerRes.status === 'fulfilled' ? callerRes.value : {};
+    const callrail = callrailRes.status === 'fulfilled' ? callrailRes.value : {};
+    const shopify = shopifyRes.status === 'fulfilled' ? shopifyRes.value : {};
+    
+    // Update Name
+    const name = caller.callerName || callrail.summary?.callerName || '';
+    if (name) {
+      const nameEl = document.getElementById(`intel-name-${sid}`);
+      if (nameEl) nameEl.textContent = name;
+      // Update card header
+      const card = callCards[sid];
+      if (card) {
+        const nameHeader = card.element.querySelector('.cc-name');
+        if (nameHeader && nameHeader.textContent.includes('+')) nameHeader.textContent = name;
+        const av = card.element.querySelector('.cc-avatar');
+        if (av) av.textContent = getInitials(name);
+      }
+    }
+    
+    // Location
+    const loc = [caller.city, caller.state].filter(Boolean).join(', ') || '—';
+    const locEl = document.getElementById(`intel-loc-${sid}`);
+    if (locEl) locEl.textContent = loc;
+    
+    // CallRail stats
+    const crSummary = callrail.summary || {};
+    const callsEl = document.getElementById(`intel-calls-${sid}`);
+    if (callsEl) callsEl.textContent = crSummary.total || '0';
+    
+    // Shopify data
+    const cust = shopify.customer;
+    const orders = shopify.orders || [];
+    
+    const revEl = document.getElementById(`intel-rev-${sid}`);
+    if (revEl) revEl.textContent = cust ? `$${parseFloat(cust.total_spent || 0).toLocaleString()}` : '$0';
+    
+    const ordEl = document.getElementById(`intel-orders-${sid}`);
+    if (ordEl) ordEl.textContent = cust ? (cust.orders_count || 0) : '0';
+    
+    // Caller status
+    const statusEl = document.getElementById(`intel-status-${sid}`);
+    if (statusEl) {
+      if (cust && (cust.orders_count > 0)) {
+        statusEl.textContent = 'Customer';
+        statusEl.style.color = 'var(--green)';
+        addPill(sid, 'returning', '🔄 Returning');
+      } else if (caller.firstCall) {
+        statusEl.textContent = 'New Lead';
+        statusEl.style.color = 'var(--accent)';
+        addPill(sid, 'new', '✨ New');
+      } else if (crSummary.total > 0) {
+        statusEl.textContent = 'Returning Lead';
+        statusEl.style.color = 'var(--blue)';
+        addPill(sid, 'returning', '🔄 Returning');
+      } else {
+        statusEl.textContent = 'Unknown';
+      }
+    }
+    
+    // Source pill
+    const source = caller.source || crSummary.lastSource;
+    if (source) addPill(sid, 'source', source);
+    
+    // Lead score (if present from CallRail tags/notes)
+    const leadStatus = crSummary.leadStatus || caller.leadStatus;
+    if (leadStatus === 'hot_lead' || leadStatus === 'hot') {
+      addPill(sid, 'hot', '🔥 Hot Lead');
+    }
+    
+    // AI summary from last note
+    const lastNote = crSummary.lastNote;
+    if (lastNote) {
+      const summaryEl = document.getElementById(`ai-summary-${sid}`);
+      const textEl = document.getElementById(`ai-text-${sid}`);
+      if (summaryEl && textEl) {
+        textEl.textContent = lastNote;
+        summaryEl.style.display = 'block';
+      }
+    }
+    
+  } catch (e) {
+    console.error('Enrich error:', e);
+    // Fill with dashes on error
+    ['intel-loc', 'intel-calls', 'intel-rev', 'intel-orders', 'intel-status'].forEach(prefix => {
+      const el = document.getElementById(`${prefix}-${sid}`);
+      if (el) el.textContent = '—';
+    });
+  }
+}
+
+function addPill(sid, type, text) {
+  const card = callCards[sid];
+  if (!card) return;
+  const pills = card.element.querySelector('.cc-pills');
+  if (!pills) return;
+  // Don't duplicate
+  if (pills.querySelector(`[data-pill="${type}"]`)) return;
+  const pill = document.createElement('span');
+  pill.className = `pill pill-${type}`;
+  pill.dataset.pill = type;
+  pill.textContent = text;
+  pills.appendChild(pill);
+}
+
+// ── Actions ─────────────────────────────
+function answerCall(sid, agentId) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ANSWER_NEXT', agentId, callSid: sid }));
+    showToast(`Connecting call to ${agentId}…`, 'info');
+    stopRingTone();
+  }
+}
+
+function sendQuickSMS(sid) {
+  const card = callCards[sid];
+  if (!card) return;
+  const phone = card.call.caller;
+  // Open a quick compose
+  const msg = prompt('Quick SMS to ' + formatPhone(phone) + ':');
+  if (!msg) return;
+  
+  if (serverBaseUrl) {
+    fetch(`${serverBaseUrl}/lookup/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, note: `[SMS Queued] ${msg}`, agentId: 'glen' })
+    }).then(() => showToast('SMS note saved — send via OpenPhone', 'success'))
+      .catch(() => showToast('Failed to save note', 'error'));
+  }
+}
+
+function sendEmail(sid) {
+  const card = callCards[sid];
+  if (!card) return;
+  showToast('Opening email compose…', 'info');
+  // Could integrate with Gmail API or just open mailto
+  const phone = card.call.caller;
+  const name = card.call.callerName || 'Caller';
+  window.open(`mailto:?subject=Following up - Phoenix Phase Converters&body=Hi ${name},%0A%0AThank you for calling Phoenix Phase Converters. `, '_blank');
+}
+
+function openShopify(sid) {
+  const card = callCards[sid];
+  if (!card) return;
+  const phone = card.call.caller;
+  window.open(`https://electricmotorexperts.myshopify.com/admin/customers?query=${encodeURIComponent(phone)}`, '_blank');
+}
+
+function dismissCard(sid, reason) {
+  const card = callCards[sid];
+  if (!card || card.dismissed) return;
+  card.dismissed = true;
+  card.element.classList.add('dismissed');
+  card.element.classList.remove('ringing');
+  stopRingTone();
+  
+  // Remove after animation
+  setTimeout(() => {
+    card.element.remove();
+    delete callCards[sid];
+    // Show empty state if no cards left
+    const hasCards = document.querySelectorAll('.call-card:not(.dismissed)').length > 0;
+    document.getElementById('emptyState').style.display = hasCards ? 'none' : 'flex';
+  }, 300);
+  
+  if (reason) showToast(reason, 'info');
+}
+
+// ── Sound ─────────────────────────────────
+let audioCtx = null;
+let ringOsc = null;
+let ringGain = null;
+let ringInterval = null;
+
+function playRingTone() {
+  if (!config.soundEnabled) return;
+  stopRingTone();
+  
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    ringGain = audioCtx.createGain();
+    ringGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    ringGain.connect(audioCtx.destination);
+    
+    let ringOn = true;
+    function ring() {
+      if (!audioCtx) return;
+      ringOsc = audioCtx.createOscillator();
+      ringOsc.type = 'sine';
+      ringOsc.frequency.setValueAtTime(440, audioCtx.currentTime);
+      ringOsc.connect(ringGain);
+      ringGain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      ringOsc.start();
+      
+      setTimeout(() => {
+        if (ringGain) ringGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        if (ringOsc) { ringOsc.stop(); ringOsc = null; }
+      }, 400);
+    }
+    
+    ring();
+    ringInterval = setInterval(ring, 1200);
+    
+    // Stop after 15 seconds
+    setTimeout(stopRingTone, 15000);
+  } catch (e) {
+    console.error('Audio error:', e);
+  }
+}
+
+function stopRingTone() {
+  if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
+  if (ringOsc) { try { ringOsc.stop(); } catch {} ringOsc = null; }
+  if (ringGain) { try { ringGain.gain.setValueAtTime(0, audioCtx?.currentTime || 0); } catch {} }
+  if (audioCtx) { try { audioCtx.close(); } catch {} audioCtx = null; }
+}
+
+// ── Desktop Notifications ─────────────────
+function sendDesktopNotification(call) {
+  if (!config.notifyEnabled) return;
+  if (!('Notification' in window)) return;
+  
+  if (Notification.permission === 'default') {
+    Notification.requestPermission();
+    return;
+  }
+  if (Notification.permission !== 'granted') return;
+  
+  const phone = formatPhone(call.caller);
+  const name = call.callerName || phone;
+  
+  new Notification('📞 Incoming Call', {
+    body: `${name}\n${phone}`,
+    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="%23f97316"/><text x="16" y="22" text-anchor="middle" font-size="18" fill="white">📞</text></svg>',
+    tag: 'phoenix-call-' + call.callSid,
+    requireInteraction: true
+  });
+}
+
+// ── Helpers ────────────────────────────────
+function formatPhone(phone) {
+  if (!phone) return '—';
+  const d = phone.replace(/\D/g, '');
+  if (d.length === 11) return `+1 (${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  return phone;
+}
+
+function getInitials(name) {
+  if (!name || name === 'Unknown') return '?';
+  return name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
+}
+
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+// ── Init ──────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Request notification permission
+  if ('Notification' in window && Notification.permission === 'default') {
+    // Will prompt on first call
+  }
+  
+  // Auto-connect
+  if (config.serverUrl) {
+    connectWS();
+  }
+});
+</script>
+</body>
+</html>
