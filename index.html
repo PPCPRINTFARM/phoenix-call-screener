@@ -1007,9 +1007,17 @@ async function createCard(call, activeCalls) {
           <div class="intel-label">Status</div>
           <div class="intel-value" id="intel-status-${sid}"><div class="shimmer" style="width:60px;height:14px;"></div></div>
         </div>
+        <div class="intel-item">
+          <div class="intel-label">Last Order #</div>
+          <div class="intel-value accent" id="intel-order-num-${sid}"><div class="shimmer" style="width:70px;height:14px;"></div></div>
+        </div>
+        <div class="intel-item">
+          <div class="intel-label">Order Status</div>
+          <div class="intel-value" id="intel-order-status-${sid}"><div class="shimmer" style="width:60px;height:14px;"></div></div>
+        </div>
       </div>
       <div class="cc-ai-summary" id="ai-summary-${sid}" style="display:none;">
-        <div class="cc-ai-label">✦ AI Summary</div>
+        <div class="cc-ai-label">✦ Last Call Summary</div>
         <div class="cc-ai-text" id="ai-text-${sid}"></div>
       </div>
       <div class="cc-lead-row" id="lead-row-${sid}" style="display:none;">
@@ -1126,6 +1134,30 @@ async function enrichCard(sid, phone) {
     const ordEl = document.getElementById(`intel-orders-${sid}`);
     if (ordEl) ordEl.textContent = cust ? (cust.orders_count || 0) : '0';
     
+    // Last Order # and Order Status
+    const orderNumEl = document.getElementById(`intel-order-num-${sid}`);
+    const orderStatusEl = document.getElementById(`intel-order-status-${sid}`);
+    if (orders.length > 0) {
+      const lastOrder = orders[0];
+      if (orderNumEl) {
+        orderNumEl.textContent = lastOrder.name || `#${lastOrder.order_number}` || '—';
+        orderNumEl.title = `Created: ${new Date(lastOrder.created_at).toLocaleDateString()}`;
+        orderNumEl.style.cursor = 'pointer';
+        orderNumEl.onclick = () => window.open(`https://electricmotorexperts.myshopify.com/admin/orders/${lastOrder.id}`, '_blank');
+      }
+      if (orderStatusEl) {
+        const fs = lastOrder.financial_status || '';
+        const ff = lastOrder.fulfillment_status || 'unfulfilled';
+        let statusText = fs === 'paid' ? 'Paid' : fs === 'pending' ? 'Pending' : fs === 'refunded' ? 'Refunded' : fs || '—';
+        let fulfillText = ff === 'fulfilled' ? 'Shipped' : ff === 'partial' ? 'Partial Ship' : 'Not Shipped';
+        orderStatusEl.textContent = `${statusText} / ${fulfillText}`;
+        orderStatusEl.style.color = fs === 'paid' ? 'var(--green)' : fs === 'pending' ? 'var(--yellow)' : 'var(--text2)';
+      }
+    } else {
+      if (orderNumEl) orderNumEl.textContent = '—';
+      if (orderStatusEl) orderStatusEl.textContent = '—';
+    }
+    
     // Caller status
     const statusEl = document.getElementById(`intel-status-${sid}`);
     if (statusEl) {
@@ -1156,25 +1188,102 @@ async function enrichCard(sid, phone) {
       addPill(sid, 'hot', '🔥 Hot Lead');
     }
     
-    // AI summary from last note
+    // Call Summary — try CallRail note first, then fetch QUO summary
     const lastNote = crSummary.lastNote;
-    if (lastNote) {
-      const summaryEl = document.getElementById(`ai-summary-${sid}`);
-      const textEl = document.getElementById(`ai-text-${sid}`);
-      if (summaryEl && textEl) {
-        textEl.textContent = lastNote;
-        summaryEl.style.display = 'block';
+    const summaryEl = document.getElementById(`ai-summary-${sid}`);
+    const textEl = document.getElementById(`ai-text-${sid}`);
+    
+    if (lastNote && summaryEl && textEl) {
+      textEl.textContent = lastNote;
+      summaryEl.style.display = 'block';
+    } else if (summaryEl && textEl) {
+      // Try QUO (OpenPhone) call summary for this number
+      try {
+        const quoSummary = await fetchQUOSummary(phone);
+        if (quoSummary) {
+          textEl.textContent = quoSummary;
+          summaryEl.style.display = 'block';
+        }
+      } catch (e) {
+        console.log('QUO summary not available:', e.message);
       }
     }
     
   } catch (e) {
     console.error('Enrich error:', e);
     // Fill with dashes on error
-    ['intel-loc', 'intel-calls', 'intel-rev', 'intel-orders', 'intel-status'].forEach(prefix => {
+    ['intel-loc', 'intel-calls', 'intel-rev', 'intel-orders', 'intel-status', 'intel-order-num', 'intel-order-status'].forEach(prefix => {
       const el = document.getElementById(`${prefix}-${sid}`);
       if (el) el.textContent = '—';
     });
   }
+}
+
+// ── QUO (OpenPhone) Call Summary Fetch ───
+const QUO_API_KEY = '0opOboF8pDshpmpGndl31aoqwm5ZLm23';
+let quoPhoneNumberIds = null; // cache
+
+async function getQUOPhoneNumberIds() {
+  if (quoPhoneNumberIds) return quoPhoneNumberIds;
+  try {
+    const r = await fetch('https://api.openphone.com/v1/phone-numbers', {
+      headers: { 'Authorization': QUO_API_KEY }
+    });
+    const d = await r.json();
+    quoPhoneNumberIds = (d.data || []).map(p => p.id);
+    return quoPhoneNumberIds;
+  } catch (e) {
+    console.error('QUO phone numbers error:', e);
+    return [];
+  }
+}
+
+async function fetchQUOSummary(phone) {
+  const pnIds = await getQUOPhoneNumberIds();
+  if (!pnIds.length) return null;
+  
+  // Format phone to E.164
+  let e164 = phone.replace(/\D/g, '');
+  if (e164.length === 10) e164 = '1' + e164;
+  e164 = '+' + e164;
+  
+  // Try each phone number ID to find calls with this participant
+  for (const pnId of pnIds) {
+    try {
+      const r = await fetch(
+        `https://api.openphone.com/v1/calls?phoneNumberId=${pnId}&participants[]=${encodeURIComponent(e164)}&maxResults=1`,
+        { headers: { 'Authorization': QUO_API_KEY } }
+      );
+      const d = await r.json();
+      const calls = d.data || [];
+      if (calls.length === 0) continue;
+      
+      const callId = calls[0].id;
+      
+      // Fetch call summary
+      try {
+        const sr = await fetch(
+          `https://api.openphone.com/v1/call-summaries/${callId}`,
+          { headers: { 'Authorization': QUO_API_KEY } }
+        );
+        if (sr.ok) {
+          const sd = await sr.json();
+          const summary = sd.data?.summary || sd.data?.text || sd.summary || null;
+          if (summary) return summary;
+        }
+      } catch {}
+      
+      // Fallback: if no summary, just return basic call info
+      const lastCall = calls[0];
+      const dir = lastCall.direction === 'incoming' ? 'Inbound' : 'Outbound';
+      const dur = lastCall.duration ? `${Math.round(lastCall.duration / 60)}m` : '';
+      const when = new Date(lastCall.createdAt).toLocaleDateString();
+      return `Last call: ${dir} ${dur} on ${when}`;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 function addPill(sid, type, text) {
