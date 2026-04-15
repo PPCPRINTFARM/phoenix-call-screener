@@ -1313,7 +1313,6 @@ function sendQuickSMS(sid) {
   const card = callCards[sid];
   if (!card) return;
   const phone = card.call.caller;
-  // Open a quick compose
   const msg = prompt('Quick SMS to ' + formatPhone(phone) + ':');
   if (!msg) return;
   
@@ -1327,21 +1326,404 @@ function sendQuickSMS(sid) {
   }
 }
 
-function sendEmail(sid) {
-  const card = callCards[sid];
-  if (!card) return;
-  showToast('Opening email compose…', 'info');
-  // Could integrate with Gmail API or just open mailto
-  const phone = card.call.caller;
-  const name = card.call.callerName || 'Caller';
-  window.open(`mailto:?subject=Following up - Phoenix Phase Converters&body=Hi ${name},%0A%0AThank you for calling Phoenix Phase Converters. `, '_blank');
+// ── Shared Call Analysis (Claude) ────────
+// Keys loaded from localStorage config or defaults
+const ANTHROPIC_KEY = localStorage.getItem('phoenix-anthropic-key') || '';
+const SHOPIFY_ADMIN_TOKEN = localStorage.getItem('phoenix-shopify-token') || '';
+const SHOPIFY_DOMAIN = 'electricmotorexperts.myshopify.com';
+const N8N_CALLBACK_URL = 'https://phoenixphaseconverters.app.n8n.cloud/webhook/callrail-intelligence-callback';
+
+// Auto-set keys on first load (run once in console or via init script)
+if (!ANTHROPIC_KEY || !SHOPIFY_ADMIN_TOKEN) {
+  console.warn('[Phoenix] API keys not configured. Run initKeys() from the console or settings.');
+}
+function initKeys(anthropic, shopify) {
+  if (anthropic) localStorage.setItem('phoenix-anthropic-key', anthropic);
+  if (shopify) localStorage.setItem('phoenix-shopify-token', shopify);
+  location.reload();
 }
 
-function openShopify(sid) {
+// Cache analyzed results per phone
+const analysisCache = {};
+
+async function fetchQUOTranscript(phone) {
+  const pnIds = await getQUOPhoneNumberIds();
+  if (!pnIds.length) return null;
+  let e164 = phone.replace(/\D/g, '');
+  if (e164.length === 10) e164 = '1' + e164;
+  e164 = '+' + e164;
+
+  for (const pnId of pnIds) {
+    try {
+      const r = await fetch(
+        `https://api.openphone.com/v1/calls?phoneNumberId=${pnId}&participants[]=${encodeURIComponent(e164)}&maxResults=3`,
+        { headers: { 'Authorization': QUO_API_KEY } }
+      );
+      const d = await r.json();
+      const calls = d.data || [];
+      if (!calls.length) continue;
+
+      // Try to get transcript from most recent call
+      for (const call of calls) {
+        try {
+          const tr = await fetch(
+            `https://api.openphone.com/v1/call-transcripts/${call.id}`,
+            { headers: { 'Authorization': QUO_API_KEY } }
+          );
+          if (tr.ok) {
+            const td = await tr.json();
+            const dialogue = td.data?.dialogue || td.data?.transcript || td.dialogue || null;
+            if (dialogue) {
+              // Format dialogue array into readable transcript
+              let text = '';
+              if (Array.isArray(dialogue)) {
+                text = dialogue.map(d => `${d.speaker || d.role || 'Speaker'}: ${d.content || d.text || ''}`).join('\n');
+              } else if (typeof dialogue === 'string') {
+                text = dialogue;
+              }
+              if (text && text.length > 20) {
+                // Also get summary
+                let summary = '';
+                try {
+                  const sr = await fetch(`https://api.openphone.com/v1/call-summaries/${call.id}`, { headers: { 'Authorization': QUO_API_KEY } });
+                  if (sr.ok) { const sd = await sr.json(); summary = sd.data?.summary || ''; }
+                } catch {}
+                return { transcript: text, summary, callId: call.id, duration: call.duration, direction: call.direction, createdAt: call.createdAt };
+              }
+            }
+          }
+        } catch {}
+      }
+      // No transcript found, return summary only
+      try {
+        const sr = await fetch(`https://api.openphone.com/v1/call-summaries/${calls[0].id}`, { headers: { 'Authorization': QUO_API_KEY } });
+        if (sr.ok) { const sd = await sr.json(); return { transcript: '', summary: sd.data?.summary || '', callId: calls[0].id, duration: calls[0].duration, direction: calls[0].direction, createdAt: calls[0].createdAt }; }
+      } catch {}
+    } catch { continue; }
+  }
+  return null;
+}
+
+async function analyzeCall(sid) {
+  const card = callCards[sid];
+  if (!card) return null;
+  const phone = card.call.caller;
+
+  // Check cache
+  if (analysisCache[phone]) return analysisCache[phone];
+
+  showToast('Fetching call transcript…', 'info');
+
+  // Parallel: fetch QUO transcript + CallRail notes + Shopify
+  const [quoData, callrailRes, shopifyRes] = await Promise.allSettled([
+    fetchQUOTranscript(phone),
+    serverBaseUrl ? fetch(`${serverBaseUrl}/lookup/callrail?phone=${encodeURIComponent(phone)}`).then(r => r.json()) : Promise.resolve({}),
+    serverBaseUrl ? fetch(`${serverBaseUrl}/lookup/shopify?phone=${encodeURIComponent(phone)}`).then(r => r.json()) : Promise.resolve({})
+  ]);
+
+  const quo = quoData.status === 'fulfilled' ? quoData.value : null;
+  const cr = callrailRes.status === 'fulfilled' ? callrailRes.value : {};
+  const shop = shopifyRes.status === 'fulfilled' ? shopifyRes.value : {};
+
+  const callerName = card.call.callerName || cr?.summary?.callerName || 'Unknown';
+  const transcript = quo?.transcript || '';
+  const summary = quo?.summary || cr?.summary?.lastNote || '';
+  const customerEmail = shop?.customer?.email || '';
+  const city = cr?.summary?.callerCity || '';
+  const state = cr?.summary?.callerState || '';
+
+  if (!transcript && !summary) {
+    showToast('No transcript or call summary found for this caller', 'error');
+    return null;
+  }
+
+  showToast('Analyzing call with AI…', 'info');
+
+  // Call Claude
+  const prompt = `Analyze this phone call for Phoenix Phase Converters.
+
+CALLER: ${callerName}
+PHONE: ${phone}
+DURATION: ${quo?.duration || 0} seconds
+CITY: ${city}
+STATE: ${state}
+
+${transcript ? 'TRANSCRIPT:\n' + transcript : 'CALL SUMMARY:\n' + summary}
+
+Based on this call, provide your analysis in EXACTLY this JSON format (no extra text):
+{
+  "action": "quote" | "follow_up" | "support" | "spam" | "none",
+  "recommended_model": "MODEL_NAME or empty",
+  "recommended_hp": 0,
+  "urgency": "HOT" | "WARM" | "COLD",
+  "lead_score": 0-100,
+  "customer_need": "brief description",
+  "call_summary": "2-3 sentence summary",
+  "email_subject": "subject line for follow-up email",
+  "email_body": "professional follow-up email body in HTML format. Use <br> for line breaks. Include specific product recommendations, pricing if discussed, and a clear call to action. Sign off as Glen at Phoenix Phase Converters. Include phone 602-437-8811 and website phoenixphaseconverters.com",
+  "sms_message": "brief SMS follow-up (under 160 chars)",
+  "product_url": "https://phoenixphaseconverters.com/product-url",
+  "email_address": "extracted email if mentioned in call, otherwise empty string",
+  "draft_order": {
+    "line_items": [{"title": "Product name", "price": "0.00", "quantity": 1}],
+    "note": "Quote generated from call - customer needs summary"
+  }
+}`;
+
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const d = await r.json();
+    let text = d.content?.map(c => c.text || '').join('') || '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const result = { ...parsed, callerName, phone, customerEmail, city, state, transcript, summary: summary || parsed.call_summary };
+      analysisCache[phone] = result;
+      return result;
+    }
+  } catch (e) {
+    console.error('Claude analysis error:', e);
+    showToast('AI analysis failed: ' + e.message, 'error');
+  }
+  return null;
+}
+
+// ── Confirmation Modal ──────────────────
+function showConfirmModal(title, content, onConfirm, onCancel) {
+  // Remove existing modal
+  document.getElementById('confirmModal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'confirmModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);';
+  modal.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;max-width:560px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,0.5);">
+      <div style="padding:18px 20px 14px;border-bottom:1px solid var(--border);">
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;">${title}</div>
+      </div>
+      <div style="padding:16px 20px;font-size:13px;color:var(--text2);line-height:1.7;" id="confirmContent">${content}</div>
+      <div style="padding:12px 20px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);">
+        <button class="action-btn btn-dismiss" id="confirmCancel" style="flex:0;">Cancel</button>
+        <button class="action-btn btn-answer" id="confirmOk" style="flex:0;">Send</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('confirmCancel').onclick = () => { modal.remove(); onCancel?.(); };
+  document.getElementById('confirmOk').onclick = () => { modal.remove(); onConfirm(); };
+  modal.onclick = (e) => { if (e.target === modal) { modal.remove(); onCancel?.(); } };
+}
+
+// ── Email Action ────────────────────────
+async function sendEmail(sid) {
   const card = callCards[sid];
   if (!card) return;
-  const phone = card.call.caller;
-  window.open(`https://electricmotorexperts.myshopify.com/admin/customers?query=${encodeURIComponent(phone)}`, '_blank');
+  const btn = card.element.querySelector('.btn-email');
+  if (btn) { btn.textContent = '⏳ Analyzing…'; btn.disabled = true; }
+
+  try {
+    const analysis = await analyzeCall(sid);
+    if (!analysis) { if (btn) { btn.textContent = '✉️ Email'; btn.disabled = false; } return; }
+
+    const emailTo = analysis.email_address || analysis.customerEmail || '';
+    const emailSubject = analysis.email_subject || 'Your Phase Converter Quote from Phoenix';
+    const emailBody = analysis.email_body || 'Thank you for calling Phoenix Phase Converters.';
+
+    // Show confirmation modal
+    const preview = `
+      <div style="margin-bottom:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px;">To</div>
+        <div style="color:var(--text);font-weight:500;">${emailTo || '<span style="color:var(--yellow)">No email on file — will need to ask</span>'}</div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px;">Subject</div>
+        <div style="color:var(--text);font-weight:500;">${emailSubject}</div>
+      </div>
+      <div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px;">Body</div>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;line-height:1.7;color:var(--text);">${emailBody}</div>
+      </div>
+      ${analysis.call_summary ? `<div style="margin-top:12px;padding:10px;background:var(--accent-dim);border-radius:8px;font-size:11px;color:var(--accent);">✦ ${analysis.call_summary}</div>` : ''}
+    `;
+
+    if (btn) { btn.textContent = '✉️ Email'; btn.disabled = false; }
+
+    showConfirmModal('📧 Follow-Up Email Preview', preview,
+      async () => {
+        // Send via N8N callback (triggers Gmail send)
+        if (!emailTo) {
+          // No email — trigger verify flow (send SMS asking for email)
+          showToast('No email on file — sending verification SMS…', 'info');
+          try {
+            // Send SMS via QUO asking for email
+            const pnIds = await getQUOPhoneNumberIds();
+            const firstName = (analysis.callerName || '').split(' ')[0] || 'there';
+            await fetch('https://api.openphone.com/v1/messages', {
+              method: 'POST',
+              headers: { 'Authorization': QUO_API_KEY, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                from: pnIds[0] || 'PNpkeFjA2S',
+                to: [analysis.phone.startsWith('+') ? analysis.phone : '+1' + analysis.phone.replace(/\D/g, '')],
+                content: `Hey ${firstName}, this is Glen with Phoenix Phase Converters — what's the best email to send your quote to?`
+              })
+            });
+            showToast('Verification SMS sent — waiting for reply', 'success');
+          } catch (e) { showToast('Failed to send verification SMS: ' + e.message, 'error'); }
+          return;
+        }
+
+        // Send email via N8N Gmail flow
+        showToast('Sending email…', 'info');
+        try {
+          await fetch(N8N_CALLBACK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              callback_query: {
+                data: 'approve_email_screener-' + Date.now(),
+                from: { username: 'glen', first_name: 'Glen' },
+                message: { chat: { id: '8563284508' }, message_id: '0' },
+                id: 'screener-' + Date.now()
+              },
+              // Pass data directly for the email
+              screener_direct: true,
+              emailTo: emailTo,
+              emailSubject: emailSubject,
+              emailBody: emailBody,
+              callerName: analysis.callerName,
+              callerPhone: analysis.phone
+            })
+          });
+          showToast('Follow-up email sent via Gmail', 'success');
+        } catch (e) {
+          // Fallback: open mailto
+          showToast('N8N unavailable — opening email client', 'info');
+          window.open(`mailto:${emailTo}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody.replace(/<br>/g, '\n').replace(/<[^>]*>/g, ''))}`, '_blank');
+        }
+      }
+    );
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+    if (btn) { btn.textContent = '✉️ Email'; btn.disabled = false; }
+  }
+}
+
+// ── Shopify Quote Action ────────────────
+async function openShopify(sid) {
+  const card = callCards[sid];
+  if (!card) return;
+  const btn = card.element.querySelector('.btn-shopify');
+  if (btn) { btn.textContent = '⏳ Building Quote…'; btn.disabled = true; }
+
+  try {
+    const analysis = await analyzeCall(sid);
+    if (!analysis) { if (btn) { btn.textContent = '🛒 Shopify'; btn.disabled = false; } return; }
+
+    const draftOrder = analysis.draft_order || {};
+    const lineItems = draftOrder.line_items || [{ title: analysis.recommended_model || 'Phase Converter', price: '0.00', quantity: 1 }];
+    const callerName = analysis.callerName || 'Unknown';
+    const nameParts = callerName.split(' ');
+
+    // Build preview
+    const itemsHtml = lineItems.map(li =>
+      `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span style="color:var(--text);">${li.title} × ${li.quantity}</span>
+        <span style="color:var(--green);font-family:'JetBrains Mono',monospace;">$${parseFloat(li.price).toLocaleString()}</span>
+      </div>`
+    ).join('');
+
+    const total = lineItems.reduce((sum, li) => sum + (parseFloat(li.price) * (li.quantity || 1)), 0);
+
+    const preview = `
+      <div style="margin-bottom:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px;">Customer</div>
+        <div style="color:var(--text);font-weight:500;">${callerName} · ${formatPhone(analysis.phone)}</div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:6px;">Line Items</div>
+        ${itemsHtml}
+        <div style="display:flex;justify-content:space-between;padding:10px 0;font-weight:700;">
+          <span>Total</span>
+          <span style="color:var(--green);font-family:'JetBrains Mono',monospace;font-size:16px;">$${total.toLocaleString()}</span>
+        </div>
+      </div>
+      ${draftOrder.note ? `<div style="margin-bottom:8px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px;">Note</div><div style="font-size:12px;color:var(--text2);">${draftOrder.note}</div></div>` : ''}
+      ${analysis.customer_need ? `<div style="padding:10px;background:var(--accent-dim);border-radius:8px;font-size:11px;color:var(--accent);margin-top:8px;">✦ ${analysis.customer_need}</div>` : ''}
+    `;
+
+    if (btn) { btn.textContent = '🛒 Shopify'; btn.disabled = false; }
+
+    // Update confirm button text
+    showConfirmModal('🛒 Shopify Draft Quote', preview,
+      async () => {
+        showToast('Creating Shopify draft order…', 'info');
+        try {
+          const customer = { first_name: nameParts[0] || '', last_name: nameParts.slice(1).join(' ') || '' };
+          if (analysis.customerEmail) customer.email = analysis.customerEmail;
+          const phoneE164 = analysis.phone.startsWith('+') ? analysis.phone : '+1' + analysis.phone.replace(/\D/g, '');
+          customer.phone = phoneE164;
+
+          const shippingAddr = {};
+          if (analysis.shipping_address1) shippingAddr.address1 = analysis.shipping_address1;
+          if (analysis.shipping_city || analysis.city) shippingAddr.city = analysis.shipping_city || analysis.city;
+          if (analysis.shipping_state || analysis.state) shippingAddr.province = analysis.shipping_state || analysis.state;
+          if (analysis.shipping_zip) shippingAddr.zip = analysis.shipping_zip;
+          shippingAddr.first_name = customer.first_name;
+          shippingAddr.last_name = customer.last_name;
+          shippingAddr.country = 'US';
+
+          const payload = {
+            draft_order: {
+              line_items: lineItems.map(li => ({ title: li.title, price: String(li.price), quantity: li.quantity || 1 })),
+              customer: customer,
+              note: draftOrder.note || `Quote from Call Screener — ${analysis.call_summary || ''}`,
+              shipping_address: Object.keys(shippingAddr).length > 3 ? shippingAddr : undefined,
+              use_customer_default_address: Object.keys(shippingAddr).length <= 3
+            }
+          };
+
+          const r = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/draft_orders.json`, {
+            method: 'POST',
+            headers: { 'X-Shopify-Access-Token': SHOPIFY_ADMIN_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const d = await r.json();
+
+          if (d.draft_order) {
+            showToast(`Draft order #${d.draft_order.name || d.draft_order.id} created`, 'success');
+            // Open in Shopify admin
+            window.open(`https://${SHOPIFY_DOMAIN}/admin/draft_orders/${d.draft_order.id}`, '_blank');
+          } else {
+            showToast('Shopify error: ' + JSON.stringify(d.errors || d), 'error');
+          }
+        } catch (e) {
+          showToast('Failed to create draft: ' + e.message, 'error');
+        }
+      }
+    );
+
+    // Change confirm button text to "Create Draft"
+    setTimeout(() => {
+      const okBtn = document.getElementById('confirmOk');
+      if (okBtn) okBtn.textContent = 'Create Draft';
+    }, 10);
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+    if (btn) { btn.textContent = '🛒 Shopify'; btn.disabled = false; }
+  }
 }
 
 function dismissCard(sid, reason) {
@@ -1459,6 +1841,14 @@ function showToast(msg, type = 'info') {
 }
 
 // ── Init ──────────────────────────────────
+// Seed keys from init.js if present (loaded by Express server)
+if (window.__PHOENIX_KEYS__) {
+  if (window.__PHOENIX_KEYS__.anthropic && !localStorage.getItem('phoenix-anthropic-key'))
+    localStorage.setItem('phoenix-anthropic-key', window.__PHOENIX_KEYS__.anthropic);
+  if (window.__PHOENIX_KEYS__.shopify && !localStorage.getItem('phoenix-shopify-token'))
+    localStorage.setItem('phoenix-shopify-token', window.__PHOENIX_KEYS__.shopify);
+  if (!ANTHROPIC_KEY || !SHOPIFY_ADMIN_TOKEN) location.reload();
+}
 document.addEventListener('DOMContentLoaded', () => {
   // Request notification permission
   if ('Notification' in window && Notification.permission === 'default') {
