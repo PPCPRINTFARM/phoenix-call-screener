@@ -718,6 +718,18 @@ body {
       </div>
       <input class="setting-input" id="cfgAutoDismiss" type="number" value="0" min="0" style="width:80px;">
     </div>
+    <div style="border-top:1px solid var(--border);margin:12px 0 8px;padding-top:12px;">
+      <div class="settings-title" style="font-size:13px;margin-bottom:8px;">API Keys</div>
+      <div class="setting-hint" style="margin-bottom:10px;">Required for Email + Shopify AI features. Saved in this browser only.</div>
+    </div>
+    <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+      <div class="setting-label">Claude API Key</div>
+      <input class="setting-input" id="cfgAnthropicKey" type="password" placeholder="sk-ant-..." style="width:100%;font-size:11px;">
+    </div>
+    <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+      <div class="setting-label">Shopify Admin Token</div>
+      <input class="setting-input" id="cfgShopifyToken" type="password" placeholder="shpat_..." style="width:100%;font-size:11px;">
+    </div>
     <div class="settings-actions">
       <button class="action-btn btn-dismiss" onclick="closeSettings()">Cancel</button>
       <button class="action-btn btn-answer" onclick="saveSettings()">Save</button>
@@ -790,6 +802,8 @@ document.getElementById('settingsBtn').onclick = () => {
   document.getElementById('cfgSound').className = 'setting-toggle' + (config.soundEnabled ? ' on' : '');
   document.getElementById('cfgNotify').className = 'setting-toggle' + (config.notifyEnabled ? ' on' : '');
   document.getElementById('cfgAutoDismiss').value = config.autoDismiss;
+  document.getElementById('cfgAnthropicKey').value = localStorage.getItem('phoenix-anthropic-key') || '';
+  document.getElementById('cfgShopifyToken').value = localStorage.getItem('phoenix-shopify-token') || '';
   overlay.classList.add('open');
 };
 
@@ -803,9 +817,17 @@ function saveSettings() {
   config.soundEnabled = document.getElementById('cfgSound').classList.contains('on');
   config.notifyEnabled = document.getElementById('cfgNotify').classList.contains('on');
   config.autoDismiss = parseInt(document.getElementById('cfgAutoDismiss').value) || 0;
+  // Save API keys
+  const ak = document.getElementById('cfgAnthropicKey').value.trim();
+  const sk = document.getElementById('cfgShopifyToken').value.trim();
+  if (ak) localStorage.setItem('phoenix-anthropic-key', ak);
+  if (sk) localStorage.setItem('phoenix-shopify-token', sk);
+  
   saveConfig(config);
   closeSettings();
-  showToast('Settings saved', 'success');
+  const keysChanged = (ak && ak !== ANTHROPIC_KEY) || (sk && sk !== SHOPIFY_ADMIN_TOKEN);
+  showToast('Settings saved' + (keysChanged ? ' — reloading for new keys' : ''), 'success');
+  if (keysChanged) { setTimeout(() => location.reload(), 500); return; }
   if (changed) {
     if (ws) ws.close();
     connectWS();
